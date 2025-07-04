@@ -1,101 +1,123 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Sandbox Precache Build2</title>
-<style>
-  body { font-family: sans-serif; text-align: center; margin-top: 50px; }
-  #progress-container { width: 300px; margin: 20px auto; background: #eee; border-radius: 8px; overflow: hidden; }
-  #progress-bar { width: 0; height: 20px; background: #4caf50; }
-</style>
-</head>
-<body>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Sandbox Precache Build2</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        text-align: center;
+        margin-top: 50px;
+      }
+      #progress-container {
+        width: 300px;
+        margin: 20px auto;
+        background: #eee;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      #progress-bar {
+        width: 0;
+        height: 20px;
+        background: #4caf50;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Build2 Precache Sandbox</h1>
+    <button id="startBtn">Start Download & Cache</button>
 
-<h1>Build2 Precache Sandbox</h1>
-<button id="startBtn">Start Download & Cache</button>
+    <div id="progress-container">
+      <div id="progress-bar"></div>
+    </div>
 
-<div id="progress-container">
-  <div id="progress-bar"></div>
-</div>
+    <script>
+      const build2URL = "https://webgl-builds.github.io/SpearOnNear/";
+      const unityBuild2CacheKey = "Spear-Spear On Near-3.2";
 
-<script>
-const build2URL = "https://spearonnear.github.io/SpearOnNearBattleRoyal/";
-const unityBuild2CacheKey = "UnityCache_Spear_SpearOnNear_3.2"; // 👈 from build2 ServiceWorker.js
+      const contentToCache = [
+        "Build/tt.loader.js",
+        "Build/tt.framework.js.unityweb",
+        "Build/tt.data.unityweb",
+        "Build/tt.wasm.unityweb",
+        "TemplateData/style.css",
+      ];
 
-const contentToCache = [
-  "/SpearOnNear/Build/tt.loader.js",
-  "/SpearOnNear/Build/tt.framework.js.unityweb",
-  "/SpearOnNear/Build/tt.data.unityweb",
-  "/SpearOnNear/Build/tt.wasm.unityweb",
-  "/SpearOnNear/TemplateData/style.css"
-];
+      let completedFiles = 0;
+      let loadedBytes = new Array(contentToCache.length).fill(0);
+      let totalBytes = new Array(contentToCache.length).fill(1);
 
-let completedFiles = 0;
-let loadedBytes = new Array(contentToCache.length).fill(0);
-let totalBytes = new Array(contentToCache.length).fill(1);
+      document.getElementById("startBtn").addEventListener("click", () => {
+        document.getElementById("startBtn").disabled = true;
+        startBuild2Download();
+      });
 
-document.getElementById("startBtn").addEventListener("click", () => {
-  document.getElementById("startBtn").disabled = true;
-  startBuild2Download();
-});
+      function startBuild2Download() {
+        contentToCache.forEach((path, idx) => {
+          fetch(build2URL + path)
+            .then((response) => {
+              if (!response.ok) throw new Error(`Failed to fetch ${path}`);
 
-function startBuild2Download() {
-  contentToCache.forEach((path, idx) => {
-    fetch(build2URL + path).then(response => {
-      if (!response.ok) throw new Error(`Failed to fetch ${path}`);
+              const contentLength = response.headers.get("Content-Length");
+              if (contentLength) totalBytes[idx] = parseInt(contentLength);
 
-      const contentLength = response.headers.get("Content-Length");
-      if (contentLength) totalBytes[idx] = parseInt(contentLength);
+              const reader = response.body.getReader();
+              const chunks = [];
+              let received = 0;
 
-      const reader = response.body.getReader();
-      const chunks = [];
-      let received = 0;
+              function read() {
+                return reader.read().then(({ done, value }) => {
+                  if (done) {
+                    const blob = new Blob(chunks);
+                    const finalResponse = new Response(blob, {
+                      status: 200,
+                      headers: {
+                        "Content-Type": response.headers.get("Content-Type"),
+                      },
+                    });
 
-      function read() {
-        return reader.read().then(({ done, value }) => {
-          if (done) {
-            const blob = new Blob(chunks);
-            const finalResponse = new Response(blob, {
-              status: 200,
-              headers: { "Content-Type": response.headers.get("Content-Type") }
-            });
+                    return caches
+                      .open(unityBuild2CacheKey)
+                      .then((cache) => {
+                        return cache.put(path, finalResponse);
+                      })
+                      .then(() => {
+                        completedFiles++;
+                        if (completedFiles === contentToCache.length) {
+                          console.log(
+                            "✅ All build2 files downloaded & cached."
+                          );
+                          updateProgress(100);
+                        }
+                      });
+                  }
 
-            return caches.open(unityBuild2CacheKey).then(cache => {
-              return cache.put(path, finalResponse);
-            }).then(() => {
-              completedFiles++;
-              if (completedFiles === contentToCache.length) {
-                console.log("✅ All build2 files downloaded & cached.");
-                updateProgress(100);
+                  received += value.length;
+                  loadedBytes[idx] = received;
+                  chunks.push(value);
+
+                  const percent = Math.round(
+                    (loadedBytes.reduce((a, b) => a + b, 0) /
+                      totalBytes.reduce((a, b) => a + b, 0)) *
+                      100
+                  );
+
+                  updateProgress(percent);
+                  return read();
+                });
               }
+
+              return read();
+            })
+            .catch((err) => {
+              console.error(`❌ Error caching ${path}:`, err);
             });
-          }
-
-          received += value.length;
-          loadedBytes[idx] = received;
-          chunks.push(value);
-
-          const percent = Math.round(
-            (loadedBytes.reduce((a, b) => a + b, 0) /
-             totalBytes.reduce((a, b) => a + b, 0)) * 100
-          );
-
-          updateProgress(percent);
-          return read();
         });
       }
 
-      return read();
-    }).catch(err => {
-      console.error(`❌ Error caching ${path}:`, err);
-    });
-  });
-}
-
-function updateProgress(percent) {
-  document.getElementById("progress-bar").style.width = percent + "%";
-}
-</script>
-
-</body>
+      function updateProgress(percent) {
+        document.getElementById("progress-bar").style.width = percent + "%";
+      }
+    </script>
+  </body>
 </html>
