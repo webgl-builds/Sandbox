@@ -24,7 +24,7 @@
     </style>
   </head>
   <body>
-    <h1>Build2 Precache Sandbox</h1>
+    <h1>Build2 Precache Sandbox v2</h1>
     <button id="startBtn">Start Download & Cache</button>
 
     <div id="progress-container">
@@ -96,7 +96,7 @@
 
                   received += value.byteLength;
                   loadedBytes[idx] = received;
-                  chunks.push(value.buffer);
+                  chunks.push(value); // ✅ push actual Uint8Array
 
                   const percent = Math.round(
                     (loadedBytes.reduce((a, b) => a + b, 0) /
