@@ -2,107 +2,143 @@
 <html lang="en">
 
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cache File Demo</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 20px;
-    }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cache File Demo v3</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    padding: 20px;
+  }
 
-    #progress-bar {
-      width: 100%;
-      background-color: #f3f3f3;
-      height: 20px;
-      margin-top: 10px;
-    }
+  #progress-bar {
+    width: 100%;
+    background-color: #f3f3f3;
+    height: 20px;
+    margin-top: 10px;
+    position: relative;
+  }
 
-    #progress-bar-fill {
-      height: 100%;
-      width: 0;
-      background-color: #4caf50;
-      transition: width 0.2s;
-    }
+  #progress-bar-fill {
+    height: 100%;
+    width: 0;
+    background-color: #4caf50;
+    transition: width 0.2s;
+  }
 
-    input[type="text"] {
-      width: 80%;
-      padding: 6px;
-      margin-right: 5px;
-    }
-  </style>
+  #spinner {
+    position: absolute;
+    right: 10px;
+    top: 0;
+    bottom: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+
+  input[type="text"] {
+    width: 80%;
+    padding: 6px;
+    margin-right: 5px;
+  }
+</style>
 </head>
 
 <body>
 
-  <h2>Cache File Demo v2</h2>
+<h2>Cache File Demo (with Progress)</h2>
 
-  <input type="text" id="fileUrl" placeholder="Enter file URL here">
-  <button id="downloadBtn">Download & Cache File</button>
+<input type="text" id="fileUrl" placeholder="Enter file URL here" value="https://webgl-builds.github.io/SpearOnNear/Build/tt.data.unityweb">
+<button id="downloadBtn">Download & Cache File</button>
 
-  <div id="progress-bar">
-    <div id="progress-bar-fill"></div>
-  </div>
+<div id="progress-bar">
+  <div id="progress-bar-fill"></div>
+  <div id="spinner">⏳</div>
+</div>
 
-  <p id="status"></p>
+<p id="status"></p>
 
-  <script>
-    document.getElementById('downloadBtn').addEventListener('click', async () => {
-      const url = document.getElementById('fileUrl').value.trim();
-      const cacheName = 'my-cache';
-      const progressFill = document.getElementById('progress-bar-fill');
-      const status = document.getElementById('status');
+<script>
+document.getElementById('downloadBtn').addEventListener('click', async () => {
+  const url = document.getElementById('fileUrl').value.trim();
+  const cacheName = 'my-cache';
+  const progressFill = document.getElementById('progress-bar-fill');
+  const spinner = document.getElementById('spinner');
+  const status = document.getElementById('status');
 
-      if (!url) {
-        status.textContent = 'Please enter a URL.';
-        return;
-      }
+  if (!url) {
+    status.textContent = 'Please enter a URL.';
+    return;
+  }
 
-      status.textContent = `Starting download of ${url}…`;
-      progressFill.style.width = '0%';
+  status.textContent = `Starting download of ${url}…`;
+  progressFill.style.width = '0%';
+  spinner.style.display = 'none';
 
-      try {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
 
-        const contentLength = response.headers.get('Content-Length');
-        const total = contentLength ? parseInt(contentLength, 10) : null;
+    const contentLength = response.headers.get('Content-Length');
+    const total = contentLength ? parseInt(contentLength, 10) : null;
 
-        const reader = response.body.getReader();
-        const stream = new ReadableStream({
-          start (controller) {
-            let received = 0;
+    if (!total) {
+      console.warn("Server did not send Content-Length. Progress bar will not work properly.");
+      spinner.style.display = 'flex';
+    }
 
-            function push () {
-              reader.read().then(({ done, value }) => {
-                if (done) {
-                  controller.close();
-                  return;
-                }
-                received += value.length;
-                if (total) {
-                  const percent = Math.round((received / total) * 100);
-                  progressFill.style.width = `${percent}%`;
-                }
-                controller.enqueue(value);
-                push();
-              });
+    const [stream1, stream2] = response.body.tee();
+
+    // Stream 1: progress bar
+    const progressStream = new ReadableStream({
+      start(controller) {
+        const reader = stream1.getReader();
+        let received = 0;
+
+        function push() {
+          reader.read().then(({ done, value }) => {
+            if (done) {
+              controller.close();
+              spinner.style.display = 'none';
+              return;
             }
+            received += value.length;
+            if (total) {
+              const percent = Math.round((received / total) * 100);
+              progressFill.style.width = `${percent}%`;
+            }
+            controller.enqueue(value);
             push();
-          }
-        });
-
-        const streamedResponse = new Response(stream);
-        const cache = await caches.open(cacheName);
-        await cache.put(url, streamedResponse.clone());
-        status.textContent = `File cached successfully: ${url}`;
-        progressFill.style.width = `100%`;
-      } catch (err) {
-        status.textContent = `Error: ${err.message}`;
+          });
+        }
+        push();
       }
     });
-  </script>
+
+    const progressResponse = new Response(progressStream, {
+      headers: response.headers
+    });
+
+    const cacheResponse = new Response(stream2, {
+      headers: response.headers
+    });
+
+    // Cache stream2
+    const cache = await caches.open(cacheName);
+    await cache.put(url, cacheResponse.clone());
+
+    // Drain progress stream
+    await progressResponse.blob();
+
+    status.textContent = `✅ File cached successfully: ${url}`;
+    progressFill.style.width = `100%`;
+    spinner.style.display = 'none';
+  } catch (err) {
+    status.textContent = `❌ Error: ${err.message}`;
+    spinner.style.display = 'none';
+  }
+});
+</script>
 
 </body>
-
 </html>
