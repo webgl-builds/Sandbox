@@ -33,7 +33,7 @@
 
     <script>
       const build2URL = "https://webgl-builds.github.io/SpearOnNear/";
-      const unityBuild2CacheKey = "Spear-Spear On Near-3.2";
+      const unityBuild2CacheKey = "Spear-Spear On Near-3.2"; // 👈 from build2 ServiceWorker.js
 
       const contentToCache = [
         "Build/tt.loader.js",
@@ -68,7 +68,9 @@
               function read() {
                 return reader.read().then(({ done, value }) => {
                   if (done) {
-                    const blob = new Blob(chunks);
+                    const blob = new Blob(chunks, {
+                      type: response.headers.get("Content-Type"),
+                    });
                     const finalResponse = new Response(blob, {
                       status: 200,
                       headers: {
@@ -92,9 +94,9 @@
                       });
                   }
 
-                  received += value.length;
+                  received += value.byteLength;
                   loadedBytes[idx] = received;
-                  chunks.push(value);
+                  chunks.push(value.buffer);
 
                   const percent = Math.round(
                     (loadedBytes.reduce((a, b) => a + b, 0) /
