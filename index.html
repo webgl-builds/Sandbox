@@ -1,125 +1,108 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Sandbox Precache Build2</title>
-    <style>
-      body {
-        font-family: sans-serif;
-        text-align: center;
-        margin-top: 50px;
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cache File Demo</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+
+    #progress-bar {
+      width: 100%;
+      background-color: #f3f3f3;
+      height: 20px;
+      margin-top: 10px;
+    }
+
+    #progress-bar-fill {
+      height: 100%;
+      width: 0;
+      background-color: #4caf50;
+      transition: width 0.2s;
+    }
+
+    input[type="text"] {
+      width: 80%;
+      padding: 6px;
+      margin-right: 5px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h2>Cache File Demo v2</h2>
+
+  <input type="text" id="fileUrl" placeholder="Enter file URL here">
+  <button id="downloadBtn">Download & Cache File</button>
+
+  <div id="progress-bar">
+    <div id="progress-bar-fill"></div>
+  </div>
+
+  <p id="status"></p>
+
+  <script>
+    document.getElementById('downloadBtn').addEventListener('click', async () => {
+      const url = document.getElementById('fileUrl').value.trim();
+      const cacheName = 'my-cache';
+      const progressFill = document.getElementById('progress-bar-fill');
+      const status = document.getElementById('status');
+
+      if (!url) {
+        status.textContent = 'Please enter a URL.';
+        return;
       }
-      #progress-container {
-        width: 300px;
-        margin: 20px auto;
-        background: #eee;
-        border-radius: 8px;
-        overflow: hidden;
-      }
-      #progress-bar {
-        width: 0;
-        height: 20px;
-        background: #4caf50;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>Build2 Precache Sandbox v2</h1>
-    <button id="startBtn">Start Download & Cache</button>
 
-    <div id="progress-container">
-      <div id="progress-bar"></div>
-    </div>
+      status.textContent = `Starting download of ${url}…`;
+      progressFill.style.width = '0%';
 
-    <script>
-      const build2URL = "https://webgl-builds.github.io/SpearOnNear/";
-      const unityBuild2CacheKey = "Spear-Spear On Near-3.2"; // 👈 from build2 ServiceWorker.js
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
 
-      const contentToCache = [
-        "Build/tt.loader.js",
-        "Build/tt.framework.js.unityweb",
-        "Build/tt.data.unityweb",
-        "Build/tt.wasm.unityweb",
-        "TemplateData/style.css",
-      ];
+        const contentLength = response.headers.get('Content-Length');
+        const total = contentLength ? parseInt(contentLength, 10) : null;
 
-      let completedFiles = 0;
-      let loadedBytes = new Array(contentToCache.length).fill(0);
-      let totalBytes = new Array(contentToCache.length).fill(1);
+        const reader = response.body.getReader();
+        const stream = new ReadableStream({
+          start (controller) {
+            let received = 0;
 
-      document.getElementById("startBtn").addEventListener("click", () => {
-        document.getElementById("startBtn").disabled = true;
-        startBuild2Download();
-      });
-
-      function startBuild2Download() {
-        contentToCache.forEach((path, idx) => {
-          fetch(build2URL + path)
-            .then((response) => {
-              if (!response.ok) throw new Error(`Failed to fetch ${path}`);
-
-              const contentLength = response.headers.get("Content-Length");
-              if (contentLength) totalBytes[idx] = parseInt(contentLength);
-
-              const reader = response.body.getReader();
-              const chunks = [];
-              let received = 0;
-
-              function read() {
-                return reader.read().then(({ done, value }) => {
-                  if (done) {
-                    const blob = new Blob(chunks, {
-                      type: response.headers.get("Content-Type"),
-                    });
-                    const finalResponse = new Response(blob, {
-                      status: 200,
-                      headers: {
-                        "Content-Type": response.headers.get("Content-Type"),
-                      },
-                    });
-
-                    return caches
-                      .open(unityBuild2CacheKey)
-                      .then((cache) => {
-                        return cache.put(path, finalResponse);
-                      })
-                      .then(() => {
-                        completedFiles++;
-                        if (completedFiles === contentToCache.length) {
-                          console.log(
-                            "✅ All build2 files downloaded & cached."
-                          );
-                          updateProgress(100);
-                        }
-                      });
-                  }
-
-                  received += value.byteLength;
-                  loadedBytes[idx] = received;
-                  chunks.push(value); // ✅ push actual Uint8Array
-
-                  const percent = Math.round(
-                    (loadedBytes.reduce((a, b) => a + b, 0) /
-                      totalBytes.reduce((a, b) => a + b, 0)) *
-                      100
-                  );
-
-                  updateProgress(percent);
-                  return read();
-                });
-              }
-
-              return read();
-            })
-            .catch((err) => {
-              console.error(`❌ Error caching ${path}:`, err);
-            });
+            function push () {
+              reader.read().then(({ done, value }) => {
+                if (done) {
+                  controller.close();
+                  return;
+                }
+                received += value.length;
+                if (total) {
+                  const percent = Math.round((received / total) * 100);
+                  progressFill.style.width = `${percent}%`;
+                }
+                controller.enqueue(value);
+                push();
+              });
+            }
+            push();
+          }
         });
-      }
 
-      function updateProgress(percent) {
-        document.getElementById("progress-bar").style.width = percent + "%";
+        const streamedResponse = new Response(stream);
+        const cache = await caches.open(cacheName);
+        await cache.put(url, streamedResponse.clone());
+        status.textContent = `File cached successfully: ${url}`;
+        progressFill.style.width = `100%`;
+      } catch (err) {
+        status.textContent = `Error: ${err.message}`;
       }
-    </script>
-  </body>
+    });
+  </script>
+
+</body>
+
 </html>
